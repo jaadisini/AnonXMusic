@@ -6,7 +6,7 @@ from pyrogram.types import Message, CallbackQuery
 
 
 from anony import app
-from anony import*
+from anony.helpers._admins import is_admin
 
 
 async def admin_filter_func(_, __, obj: Message | CallbackQuery) -> bool:
