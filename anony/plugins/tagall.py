@@ -1,96 +1,164 @@
 import asyncio
 from pyrogram import Client, filters
+from pyrogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
+from pyrogram.errors import FloodWait
 from pyrogram.enums import ChatMemberStatus
-from pyrogram.errors import UserNotParticipant, FloodWait
-from pyrogram.types import Message, CallbackQuery
-
 
 from anony import app
 from anony.helpers._admins import is_admin
 
 
+# ================= ADMIN FILTER =================
+
 async def admin_filter_func(_, __, obj: Message | CallbackQuery) -> bool:
     msg = obj.message if isinstance(obj, CallbackQuery) else obj
-
-    if getattr(msg, "edit_date", False):
-        return False
-
     if not msg.from_user:
         return False
-
     return await is_admin(msg.chat.id, msg.from_user.id)
 
-admin_filter = filters.create(func=admin_filter_func, name="AdminFilter")
-spam_chats = set()
 
+admin_filter = filters.create(admin_filter_func)
+
+# ================= GLOBAL =================
+
+active_tags = {}  # chat_id: {"running": bool, "task": task}
+pending_tags = {}  # chat_id: {"text": str}
+
+
+# ================= START COMMAND =================
 
 @app.on_message(filters.command(["utag", "all", "mention"]) & filters.group & admin_filter)
-async def tag_all_users(client: Client, message: Message):
-    replied = message.reply_to_message
+async def choose_duration(client: Client, message: Message):
+    chat_id = message.chat.id
     text = message.text.split(None, 1)[1] if len(message.command) > 1 else ""
 
-    if not replied and not text:
-        return await message.reply("**ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇssᴀɢᴇ ᴏʀ ɢɪᴠᴇ sᴏᴍᴇ ᴛᴇxᴛ ᴛᴏ ᴛᴀɢ ᴀʟʟ.**")
+    if not text and not message.reply_to_message:
+        return await message.reply("Reply atau beri teks untuk tag semua.")
 
-    spam_chats.add(message.chat.id)
-    usernum, usertxt, total_tagged = 0, "", 0
+    pending_tags[chat_id] = {"text": text}
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("1m", callback_data=f"starttag:{chat_id}:60"),
+                InlineKeyboardButton("2m", callback_data=f"starttag:{chat_id}:120"),
+                InlineKeyboardButton("3m", callback_data=f"starttag:{chat_id}:180"),
+            ],
+            [
+                InlineKeyboardButton("4m", callback_data=f"starttag:{chat_id}:240"),
+                InlineKeyboardButton("5m", callback_data=f"starttag:{chat_id}:300"),
+                InlineKeyboardButton("10m", callback_data=f"starttag:{chat_id}:600"),
+            ],
+        ]
+    )
+
+    await message.reply(
+        "⏳ **Pilih Durasi Auto Cancel Sebelum Memulai Tagging:**",
+        reply_markup=keyboard,
+    )
+
+
+# ================= START TAGGING =================
+
+@app.on_callback_query(filters.regex(r"starttag:(-?\d+):(\d+)"))
+async def start_tagging(client: Client, query: CallbackQuery):
+    chat_id = int(query.data.split(":")[1])
+    duration = int(query.data.split(":")[2])
+
+    if chat_id in active_tags:
+        return await query.answer("Tagging already running.", show_alert=True)
+
+    if chat_id not in pending_tags:
+        return await query.answer("Session expired.", show_alert=True)
+
+    text = pending_tags[chat_id]["text"]
+    pending_tags.pop(chat_id, None)
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🛑 Cancel Now", callback_data=f"cancel:{chat_id}")]
+        ]
+    )
+
+    await query.message.edit_text("🚀 **TAGGING STARTED...**", reply_markup=keyboard)
+
+    active_tags[chat_id] = {"running": True}
+
+    async def auto_stop():
+        await asyncio.sleep(duration)
+        if chat_id in active_tags:
+            active_tags[chat_id]["running"] = False
+            try:
+                await query.message.edit_text(
+                    f"⏳ **AUTO CANCELLED AFTER {duration//60} MINUTES.**"
+                )
+            except:
+                pass
+
+    asyncio.create_task(auto_stop())
+
+    total = 0
+    buffer = []
 
     try:
-        async for member in client.get_chat_members(message.chat.id):
-            if message.chat.id not in spam_chats:
+        async for member in client.get_chat_members(chat_id):
+
+            if not active_tags.get(chat_id, {}).get("running"):
                 break
 
             if not member.user or member.user.is_bot:
                 continue
 
-            usernum += 1
-            total_tagged += 1
-            usertxt += f"⊚ [{member.user.first_name}](tg://user?id={member.user.id})\n"
+            total += 1
+            buffer.append(
+                f"• [{member.user.first_name}](tg://user?id={member.user.id})"
+            )
 
-            if usernum == 5:
+            if len(buffer) == 5:
+                caption = (
+                    f"{text}\n\n"
+                    + "\n".join(buffer)
+                    + f"\n\n📢 TAGGING {total} USERS DONE..."
+                )
+
                 try:
-                    if replied:
-                        await replied.reply_text(f"{text}\n{usertxt}\n📢 ᴛᴀɢɢɪɴɢ {total_tagged} ᴜsᴇʀs ᴅᴏɴᴇ...")
-                    else:
-                        await message.reply_text(f"{text}\n{usertxt}\n📢 ᴛᴀɢɢɪɴɢ {total_tagged} ᴜsᴇʀs ᴅᴏɴᴇ...")
+                    await query.message.edit_text(
+                        caption,
+                        reply_markup=keyboard,
+                        disable_web_page_preview=True,
+                    )
                 except FloodWait as e:
                     await asyncio.sleep(e.value)
-                except Exception:
-                    pass
 
-                await asyncio.sleep(3)
-                usernum, usertxt = 0, ""
+                await asyncio.sleep(2)
+                buffer.clear()
 
-        if usertxt:
-            try:
-                if replied:
-                    await replied.reply_text(f"{text}\n{usertxt}\n📢 ᴛᴀɢɢɪɴɢ {total_tagged} ᴜsᴇʀs ᴅᴏɴᴇ...")
-                else:
-                    await message.reply_text(f"{text}\n{usertxt}\n📢 ᴛᴀɢɢɪɴɢ {total_tagged} ᴜsᴇʀs ᴅᴏɴᴇ...")
-            except Exception:
-                pass
+        if active_tags.get(chat_id, {}).get("running"):
+            await query.message.edit_text(
+                f"✅ **TAGGING COMPLETED. TOTAL:** `{total}` USERS."
+            )
 
-        await message.reply(f"✅ **ᴛᴀɢɢɪɴɢ ᴄᴏᴍᴘʟᴇᴛᴇᴅ. ᴛᴏᴛᴀʟ:** `{total_tagged}` **ᴜsᴇʀs.**")
-
+    except:
+        pass
     finally:
-        spam_chats.discard(message.chat.id)
+        active_tags.pop(chat_id, None)
 
 
-@app.on_message(filters.command(["cancel", "ustop"]))
-async def cancel_spam(client: Client, message: Message):
-    chat_id = message.chat.id
+# ================= MANUAL CANCEL =================
 
-    if chat_id not in spam_chats:
-        return await message.reply("**ɪ'ᴍ ɴᴏᴛ ᴛᴀɢɢɪɴɢ ᴀɴʏᴏɴᴇ ʀɪɢʜᴛ ɴᴏᴡ.**")
+@app.on_callback_query(filters.regex(r"cancel:(-?\d+)"))
+async def cancel_tagging(client: Client, query: CallbackQuery):
+    chat_id = int(query.data.split(":")[1])
 
-    try:
-        member = await client.get_chat_member(chat_id, message.from_user.id)
-        if member.status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
-            return await message.reply("**ᴏɴʟʏ ᴀᴅᴍɪɴs ᴄᴀɴ ᴄᴀɴᴄᴇʟ ᴛᴀɢɢɪɴɢ.**")
-    except UserNotParticipant:
-        return await message.reply("**ʏᴏᴜ ᴀʀᴇ ɴᴏᴛ ᴀ ᴘᴀʀᴛɪᴄɪᴘᴀɴᴛ ᴏғ ᴛʜɪs ᴄʜᴀᴛ.**")
-    except Exception:
-        return await message.reply("**ᴇʀʀᴏʀ ᴄʜᴇᴄᴋɪɴɢ ᴀᴅᴍɪɴ sᴛᴀᴛᴜs.**")
+    if chat_id not in active_tags:
+        return await query.answer("No active tagging.", show_alert=True)
 
-    spam_chats.discard(chat_id)
-    return await message.reply("**🚫 ᴛᴀɢɢɪɴɢ ᴄᴀɴᴄᴇʟʟᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ.**")
+    active_tags[chat_id]["running"] = False
+
+    await query.message.edit_text("🚫 **TAGGING CANCELLED SUCCESSFULLY.**")
+    await query.answer()
