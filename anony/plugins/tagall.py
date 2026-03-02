@@ -12,7 +12,7 @@ from pyrogram.types import (
 )
 
 from anony import app
-from anony.helpers._admins import admin_check
+from anony.helpers._admins import admin_check, is_admin
 
 
 async def admin_filter_func(_, __, obj: Message | CallbackQuery) -> bool:
