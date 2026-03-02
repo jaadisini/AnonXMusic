@@ -14,6 +14,17 @@ from pyrogram.types import (
 from anony import app
 from anony.helpers._admins import admin_check
 
+
+async def admin_filter_func(_, __, obj: Message | CallbackQuery) -> bool:
+    msg = obj.message if isinstance(obj, CallbackQuery) else obj
+    if not msg.from_user:
+        return False
+    return await is_admin(msg.chat.id, msg.from_user.id)
+
+
+admin_filter = filters.create(admin_filter_func)
+
+
 # =========================
 # CONFIG
 # =========================
@@ -74,7 +85,7 @@ async def build_tag_message(title: str, users: list, bot_username: str):
 # COMMAND
 # =========================
 
-@app.on_message(filters.command("tagall") & filters.group)
+@app.on_message(filters.command(["utag", "all", "mention"]) & filters.group & admin_filter)
 @admin_check
 async def tagall_menu(client, message: Message):
 
