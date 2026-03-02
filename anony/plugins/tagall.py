@@ -12,7 +12,7 @@ from pyrogram.types import (
 )
 
 from anony import app
-from anony.helpers.admins import admin_check
+from anony.helpers._admins import admin_check
 
 # =========================
 # CONFIG
