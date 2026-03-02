@@ -13,7 +13,7 @@ async def admin_filter_func(_, __, obj: Message | CallbackQuery) -> bool:
     msg = obj.message if isinstance(obj, CallbackQuery) else obj
     if getattr(msg, "edit_date", False):
         return False
-    return await is_admin(msg)
+    return await is_admin(msg, msg.from_user.id)
 
 admin_filter = filters.create(func=admin_filter_func, name="AdminFilter")
 spam_chats = set()
