@@ -26,8 +26,8 @@ admin_filter = filters.create(admin_filter_func)
 
 # ================= GLOBAL =================
 
-active_tags = {}  
-pending_tags = {}  
+active_tags = {}  # chat_id: {"running": bool, "task": task}
+pending_tags = {}  # chat_id: {"text": str}
 
 
 # ================= START COMMAND =================
@@ -38,30 +38,27 @@ async def choose_duration(client: Client, message: Message):
     text = message.text.split(None, 1)[1] if len(message.command) > 1 else ""
 
     if not text and not message.reply_to_message:
-        return await message.reply(
-            "⚠️ **Reply pesan atau berikan teks untuk tag semua!**"
-        )
+        return await message.reply("Reply atau beri teks untuk tag semua.")
 
     pending_tags[chat_id] = {"text": text}
 
     keyboard = InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("⏱ 1 Menit", callback_data=f"starttag:{chat_id}:60"),
-                InlineKeyboardButton("⏱ 2 Menit", callback_data=f"starttag:{chat_id}:120"),
-                InlineKeyboardButton("⏱ 3 Menit", callback_data=f"starttag:{chat_id}:180"),
+                InlineKeyboardButton("1m", callback_data=f"starttag:{chat_id}:60"),
+                InlineKeyboardButton("2m", callback_data=f"starttag:{chat_id}:120"),
+                InlineKeyboardButton("3m", callback_data=f"starttag:{chat_id}:180"),
             ],
             [
-                InlineKeyboardButton("⏱ 4 Menit", callback_data=f"starttag:{chat_id}:240"),
-                InlineKeyboardButton("⏱ 5 Menit", callback_data=f"starttag:{chat_id}:300"),
-                InlineKeyboardButton("🔥 10 Menit", callback_data=f"starttag:{chat_id}:600"),
+                InlineKeyboardButton("4m", callback_data=f"starttag:{chat_id}:240"),
+                InlineKeyboardButton("5m", callback_data=f"starttag:{chat_id}:300"),
+                InlineKeyboardButton("10m", callback_data=f"starttag:{chat_id}:600"),
             ],
         ]
     )
 
     await message.reply(
-        "🚀 **MODE TAG SEMUA**\n\n"
-        "📌 Pilih durasi sebelum auto cancel berjalan:",
+        "⏳ **Pilih Durasi Auto Cancel Sebelum Memulai Tagging:**",
         reply_markup=keyboard,
     )
 
@@ -74,25 +71,21 @@ async def start_tagging(client: Client, query: CallbackQuery):
     duration = int(query.data.split(":")[2])
 
     if chat_id in active_tags:
-        return await query.answer("⚠️ Tagging sedang berjalan!", show_alert=True)
+        return await query.answer("Tagging already running.", show_alert=True)
 
     if chat_id not in pending_tags:
-        return await query.answer("⏳ Sesi sudah kadaluarsa!", show_alert=True)
+        return await query.answer("Session expired.", show_alert=True)
 
     text = pending_tags[chat_id]["text"]
     pending_tags.pop(chat_id, None)
 
     keyboard = InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🛑 Hentikan Sekarang", callback_data=f"cancel:{chat_id}")]
+            [InlineKeyboardButton("🛑 Cancel Now", callback_data=f"cancel:{chat_id}")]
         ]
     )
 
-    await query.message.edit_text(
-        "🚀 **TAGGING DIMULAI...**\n\n"
-        "📢 Sedang memanggil semua member...",
-        reply_markup=keyboard,
-    )
+    await query.message.edit_text("🚀 **TAGGING STARTED...**", reply_markup=keyboard)
 
     active_tags[chat_id] = {"running": True}
 
@@ -102,8 +95,7 @@ async def start_tagging(client: Client, query: CallbackQuery):
             active_tags[chat_id]["running"] = False
             try:
                 await query.message.edit_text(
-                    f"⏳ **AUTO STOP**\n\n"
-                    f"🛑 Tagging dihentikan otomatis setelah {duration//60} menit."
+                    f"⏳ **AUTO CANCELLED AFTER {duration//60} MINUTES.**"
                 )
             except:
                 pass
@@ -124,14 +116,14 @@ async def start_tagging(client: Client, query: CallbackQuery):
 
             total += 1
             buffer.append(
-                f"👤 [{member.user.first_name}](tg://user?id={member.user.id})"
+                f"• [{member.user.first_name}](tg://user?id={member.user.id})"
             )
 
             if len(buffer) == 5:
                 caption = (
-                    f"💬 **{text}**\n\n"
+                    f"{text}\n\n"
                     + "\n".join(buffer)
-                    + f"\n\n📊 Progress: `{total}` users"
+                    + f"\n\n📢 TAGGING {total} USERS DONE..."
                 )
 
                 try:
@@ -148,8 +140,7 @@ async def start_tagging(client: Client, query: CallbackQuery):
 
         if active_tags.get(chat_id, {}).get("running"):
             await query.message.edit_text(
-                f"✅ **TAGGING SELESAI!**\n\n"
-                f"📢 Total Member Ditag: `{total}`"
+                f"✅ **TAGGING COMPLETED. TOTAL:** `{total}` USERS."
             )
 
     except:
@@ -165,12 +156,9 @@ async def cancel_tagging(client: Client, query: CallbackQuery):
     chat_id = int(query.data.split(":")[1])
 
     if chat_id not in active_tags:
-        return await query.answer("⚠️ Tidak ada tagging aktif!", show_alert=True)
+        return await query.answer("No active tagging.", show_alert=True)
 
     active_tags[chat_id]["running"] = False
 
-    await query.message.edit_text(
-        "🚫 **TAGGING DIHENTIKAN**\n\n"
-        "🛑 Proses berhasil dibatalkan."
-    )
-    await query.answer("Berhasil dihentikan ✅")
+    await query.message.edit_text("🚫 **TAGGING CANCELLED SUCCESSFULLY.**")
+    await query.answer()
